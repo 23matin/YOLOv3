@@ -36,7 +36,7 @@ def prase_cfg(cfg_file):
                 all_type.add(btype)
             else:
                 key, val = line.split("=")
-                block[key.lstrip()] = val.rstrip()
+                block[key.lstrip().rstrip()] = val.rstrip().lstrip()
         blocks.append(block)
 
     print("Summary:")
@@ -57,6 +57,15 @@ class EmptyLayer(nn.Module):
 
         self.type = layer_type
         self.data = data
+
+
+class YOLODetLayer(nn.Module):
+    def __init__(self, anchors):
+        super(YOLODetLayer, self).__init__()
+        self.anchors = anchors
+
+    def forward(self, x):
+        pass
 
 
 class BlockCreater(object):
@@ -117,17 +126,23 @@ class BlockCreater(object):
                 seq.add_module(activation_module)
         return seq
 
-    def __create_yolo(block, idx=-1):
+    def __create_yolo(self, block, idx=-1):
+        print(block)
         mask = block["mask"].split(",")
         mask = [int(x) for x in mask]
-        anchors = x["anchors"].split(",")
+        anchors = block["anchors"].split(",")
         anchors = [int(a) for a in anchors]
         anchors = [(anchors[i], anchors[i+1])
                    for i in range(0, len(anchors), 2)]
         anchors = [anchors[i] for i in mask]
 
-        print(mask)
-        print(anchors)
+        # print(mask)
+        # print(anchors)
+        if idx > 0:
+            return nn.Sequential(OrderedDict(
+                [("yolo_{}".format(idx), YOLODetLayer(anchors))]))
+        else:
+            return nn.Sequential(YOLODetLayer(anchors))
 
     def create(self, block, idx=-1):
         btype = block["btype"]
@@ -138,18 +153,18 @@ class BlockCreater(object):
             stride = int(block["stride"])
             upsample = nn.Upsample(scale_factor=stride, mode="bilinear")
             if idx > 0:
-                seq.add_module("upsample_{}".format(idx), upsample)
+                return nn.Sequential(OrderedDict(
+                    [("upsample_{}".format(idx), upsample)]))
             else:
-                seq.add_module(upsample)
-            return seq
+                return nn.Sequential(upsample)
         elif btype in ["shortcut", "route"]:
             if idx > 0:
                 return nn.Sequential(OrderedDict(
-                    [("route_{}".format(idx), EmptyLayer("route", block))]))
+                    [("{}_{}".format(btype, idx), EmptyLayer(btype, block))]))
             else:
-                nn.Sequential(EmptyLayer("route", block))
+                return nn.Sequential(EmptyLayer(btype, block))
         elif btype == "yolo":
-            self.__create_yolo(block, idx=idx)
+            return self.__create_yolo(block, idx=idx)
         else:
             raise Exception(
                 "Block type {} not support for now.".format(btype))
