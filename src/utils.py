@@ -60,19 +60,20 @@ class EmptyLayer(nn.Module):
 
 
 class YOLODetLayer(nn.Module):
+    """
+    在YOLOv3的理解中，没有neck的概念，yolov3 的cfg中的YOLO网络只有将detection结果decode的部分。
+    """
+
     def __init__(self, anchors):
         super(YOLODetLayer, self).__init__()
         self.anchors = anchors
-
-    def forward(self, x):
-        pass
 
 
 class BlockCreater(object):
     """
         create blocks of different type and return an obdect of type nn.Sequence()
         supported types are: 'route', 'convolutional', 'upsample', 'shortcut', 'yolo'
-        and will name the module accroding idx if idx is support
+        and will name the module accroding idx if idx is supported
     """
 
     def __init__(self):
@@ -127,12 +128,11 @@ class BlockCreater(object):
         return seq
 
     def __create_yolo(self, block, idx=-1):
-        print(block)
         mask = block["mask"].split(",")
         mask = [int(x) for x in mask]
         anchors = block["anchors"].split(",")
         anchors = [int(a) for a in anchors]
-        anchors = [(anchors[i], anchors[i+1])
+        anchors = [(anchors[i], anchors[i + 1])
                    for i in range(0, len(anchors), 2)]
         anchors = [anchors[i] for i in mask]
 
@@ -147,27 +147,108 @@ class BlockCreater(object):
     def create(self, block, idx=-1):
         btype = block["btype"]
         if btype == "convolutional":
-            return self.__create_conv(block, idx=idx)
+            module = self.__create_conv(block, idx=idx)
         elif btype == "upsample":
             seq = nn.Sequential()
             stride = int(block["stride"])
             upsample = nn.Upsample(scale_factor=stride, mode="bilinear")
             if idx > 0:
-                return nn.Sequential(OrderedDict(
+                module = nn.Sequential(OrderedDict(
                     [("upsample_{}".format(idx), upsample)]))
             else:
-                return nn.Sequential(upsample)
+                module = nn.Sequential(upsample)
         elif btype in ["shortcut", "route"]:
             if idx > 0:
-                return nn.Sequential(OrderedDict(
+                module = nn.Sequential(OrderedDict(
                     [("{}_{}".format(btype, idx), EmptyLayer(btype, block))]))
             else:
-                return nn.Sequential(EmptyLayer(btype, block))
+                module = nn.Sequential(EmptyLayer(btype, block))
         elif btype == "yolo":
-            return self.__create_yolo(block, idx=idx)
+            module = self.__create_yolo(block, idx=idx)
         else:
             raise Exception(
                 "Block type {} not support for now.".format(btype))
 
-def ensemble_model():
-    pass
+        return module, btype
+
+
+def str2int_or_float(string):
+    if not isinstance(string, str):
+        raise Exception("Not a valid string.")
+    try:
+        return int(string)
+    except Exception as e:
+        try:
+            return float(string)
+        except Exception as e:
+            raise Exception("Falied to convert '{}' to a number.".format(string))
+
+
+def decode_yolov3(x, cfg):
+    return x
+
+
+def get_decode_fn(name):
+    """
+    decode function factory including:
+    yolov3
+    """
+    supported_decoder = ["yolov3"]
+    if name not in supported_decoder:
+        raise Exception("ObjectDetectionDecoder type {} not supported.".format(name))
+
+
+class ObjectDetectionDecoder(object):
+    def __init__(self, name, cfg):
+        self.cfg = cfg
+        self.name = name
+        self.decode_fn = get_decode_fn(self.name)
+
+    def decode(self, x, cfg):
+        return self.decode_fn(x, cfg)
+
+
+class NetWorkByCfg(nn.Module):
+    """
+    This class is a super class which use cfg file to define a network.
+    this class will parse config file and generate:
+    1.  self.module_list
+    2.  self.net_info
+    """
+
+    def __init__(self, cfg_file):
+        super(NetWorkByCfg, self).__init__()
+
+        # 1. prase config file
+        blocks = prase_cfg(cfg_file)
+
+        # 2. Store all params hyperparameters in net_info if there is any
+        self.net_info = {}
+        for key, val in blocks[0].items():
+            self.net_info[key] = val
+
+        # 3. Use BlockCreater to get all blocks of type (nn.ModuleList) according to a .cfg file
+        self.module_list = nn.ModuleList()
+        self.module_type_list = list()
+        bc = BlockCreater()
+        for idx, block in enumerate(blocks):
+            if block["btype"] == "net":
+                continue
+            module, module_type = bc.create(block, idx)
+            self.module_list.append(module)
+            self.module_type_list.append(module_type)
+
+
+class Darknet(NetWorkByCfg):
+    def __init__(self, use_cuda=False):
+        super(Darknet, self).__init__()
+        self.use_cuda = False
+
+    def forward(self, x):
+        outputs = dict()
+        for module, module_type in enumerate(zip(self.module_list, self.module_type_list)):
+            if module_type in ["convolutional", "upsample"]:
+                x = module(x)
+            elif module_type == "shortcut":
+                # TODO
+                pass
