@@ -7,7 +7,6 @@ from torch.autograd import Variable
 import numpy as np
 import cv2
 from utils import *
-import pickle as pkl
 
 
 def test_cfg():
@@ -156,6 +155,24 @@ def test_predict_img(img_path=None):
     # cv2.imshow("frame.png", frame)
     # cv2.waitKey()
 
+def test_timer():
+    t = Timer()
+    time.sleep(1)
+    t.stop()
+    print(t.getSec())
+
+
+def test_import():
+    import os
+    os.chdir("/home/matin23")
+    # os.system("ls")
+    path = "/home/matin23/PycharmProjects/yolov3/src"
+    import sys
+    sys.path.append(path)
+    import vs_common
+    dir(vs_common)
+    a  = vs_common.Timer()
+    print(a)
 
 def test_simple():
     # test_cfg()
@@ -165,7 +182,10 @@ def test_simple():
     # test_list()
     # get_test_input()
     # test_net()
-    test_predict_img()
+    # test_predict_img()
+    # test_timer()
+    test_import()
+
 
 
 test_simple()
