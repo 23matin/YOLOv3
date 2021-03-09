@@ -6,7 +6,9 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import numpy as np
 import cv2
-from utils import *
+import sys
+# sys.path.append("/Users/zhangzhihao/workspace/YOLOv3/src") 
+from utils.utils import *
 
 
 def test_cfg():

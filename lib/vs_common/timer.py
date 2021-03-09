@@ -6,18 +6,18 @@ class Timer(object):
     Timer
     """
     def __init__(self):
-        self.start = time.time()
-        self.end = time.time()
+        self.t1 = time.time()
+        self.t2 = time.time()
 
     def start(self):
-        self.start = time.time()
+        self.t1 = time.time()
 
     def stop(self):
-        self.end = time.time()
+        self.t2 = time.time()
 
     def getMsec(self):
-        return 1000.*(self.end - self.start)
+        return 1000.*(self.t2 - self.t1)
 
     def getSec(self):
-        return self.end - self.start
+        return self.t2 - self.t1
 
