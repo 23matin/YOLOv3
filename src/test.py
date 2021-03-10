@@ -2,7 +2,7 @@ from __future__ import division
 
 import vs_common as vs
 from darknet import *
-
+from torchstat import stat
 
 def test_cfg():
     cfg_file = "/home/matin23/PycharmProjects/yolov3/cfg/yolov3.cfg"
@@ -177,7 +177,7 @@ def test_cam():
     nms_thresh = 0.4
     inp_dim = 416
 
-    cfg_file = "/home/matin23/PycharmProjects/yolov3/cfg/yolov3.cfg"
+    cfg_file = "/home/matin23/workspace/yolov3/cfg/yolov3.cfg"
     weight_file = '../data/weights/coco.pt'
     use_cuda = 1 and torch.cuda.is_available()
 
@@ -185,9 +185,16 @@ def test_cam():
     net.load_weights(weight_file)
     net.eval()
 
+    #查看显存占用：
+    if False:
+        net = Darknet(cfg_file)
+        stat(net,(3,inp_dim,inp_dim))
+        return 
+
     if use_cuda:
         print("predict using cuda!")
         net = net.cuda()
+
 
     cap = cv2.VideoCapture(0)
     timer = vs.Timer()

@@ -50,10 +50,10 @@ def decode_yolov3(x, anchors, num_classes, img_size, use_cuda=False):
     x_offset = torch.FloatTensor(a).view(-1, 1)
     y_offset = torch.FloatTensor(b).view(-1, 1)
 
+    anchors = torch.FloatTensor(anchors)
     if use_cuda:
         x_offset = x_offset.cuda()
         y_offset = y_offset.cuda()
-        anchors = torch.FloatTensor(anchors)
         anchors = anchors.cuda()
 
     x_y_offset = torch.cat((x_offset, y_offset), 1).repeat(
