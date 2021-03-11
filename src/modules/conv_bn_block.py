@@ -4,6 +4,38 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 
+class ConvBnBlock(nn.Module):
+    def __init__(self, inp, oup, enable_bn, actv_fn, kernel_size, stride, pad, idx=-1):
+        super(ConvBnBlock, self).__init__()
+        if int(pad):
+            pad = kernel_size // 2
+        else:
+            pad = 0
+
+        self.conv = nn.Conv2d(
+            inp, oup, kernel_size, stride, pad, bias=(not enable_bn))
+        self.bn = nn.BatchNorm2d(oup) if enable_bn else None
+        self.act = None
+
+        if actv_fn == "leaky":
+            self.act = nn.LeakyReLU(0.1, inplace=True)
+        elif actv_fn == "relu":
+            self.act = nn.ReLU(inplace=True)
+        elif actv_fn == "linear":
+            pass
+        else:
+            raise Exception(
+                "activation type '{}' is not support for now!".format(actv_fn))
+
+    def forward(self, x):
+        x = self.conv(x)
+        if self.bn is not None:
+            x = self.bn(x)
+        if actv_fn is not None:
+            x = self.act(x)
+        return x
+
+
 def make_conv_bn(inp, oup, enable_bn, actv_fn, kernel_size, stride, pad, idx=-1):
     """
     make a conv bn layer.

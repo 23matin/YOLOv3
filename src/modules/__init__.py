@@ -5,4 +5,4 @@ from .EmptyLayer import *
 from .YOLODetLayer import *
 from .conv_bn_block import *
 
-__all__ = ['EmptyLayer', 'YOLODetLayer', 'make_conv_bn']
+__all__ = ['EmptyLayer', 'YOLODetLayer', 'make_conv_bn', 'ConvBnBlock']

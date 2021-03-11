@@ -179,6 +179,7 @@ def test_cam():
 
     cfg_file = "/home/matin23/workspace/yolov3/cfg/yolov3.cfg"
     weight_file = '../data/weights/coco.pt'
+    weight_file = '../data/weights/yolov3.weights'
     use_cuda = 1 and torch.cuda.is_available()
 
     net = Darknet(cfg_file, use_cuda=use_cuda)
@@ -238,6 +239,39 @@ def test_import():
     a = vs_common.Timer()
     print(a)
 
+def test_nettron():
+    import netron
+    netron.start("/home/matin23/workspace/yolov3/data/weights/coco.pt")
+
+def test_tensorboard():
+    import torch
+    from torch.utils.tensorboard import SummaryWriter
+    from torchviz import make_dot
+    import torchvision.models as models
+
+    cfg_file = "/home/matin23/workspace/yolov3/cfg/yolov3.cfg"
+    net = Darknet(cfg_file)
+
+    fake_img = torch.rand(1, 3, 416, 416)  #输入一个假图片
+    out = net(fake_img)
+    # print(out)
+
+    # 1. 来用tensorboarf进行可视化
+    writer = SummaryWriter(comment='test_your_comment',filename_suffix="_test_your_filename_suffix")
+    writer.add_graph(net, fake_img)  # 模型及模型输入数据
+
+    # 2. 保存成pt文件后进行可视化
+    torch.save(net, "alexnet.pt")
+
+    # 3. 使用graphviz进行可视化
+    out = net(fake_img)
+    g = make_dot(out)
+    g.render('alexnet', view=True)  # 这种方式会生成一个pdf文件
+
+def test_ConvBnBlock():
+    # inp, oup, enable_bn, actv_fn, kernel_size, stride, pad, idx=-1)
+    block = ConvBnBlock(10,10,1,'relu',3,1,1)
+    print(block)
 
 def test_simple():
     # test_cfg()
@@ -251,6 +285,9 @@ def test_simple():
     # test_timer()
     # test_import()
     test_cam()
+    # test_nettron()
+    # test_tensorboard()
+    # test_ConvBnBlock()
 
 
 test_simple()
