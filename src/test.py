@@ -1,23 +1,19 @@
 from __future__ import division
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.autograd import Variable
-import numpy as np
-import cv2
-from utils import *
-# from common import *
+import vs_common as vs
+from darknet import *
+from torchstat import stat
+
+cfg_file = r"/home/matin23/workspace/my_yolov3/cfg/yolov3.cfg"
+weight_pt = r'/home/matin23/workspace/my_yolov3_1/data/weights/yolov3.weights'
 
 
 def test_cfg():
-    cfg_file = "/home/matin23/workspace/YOLOv3/cfg/yolov3.cfg"
-    print(prase_cfg(cfg_file))
+    prase_cfg(cfg_file)
 
 
 def testBlockCreater():
     bc = BlockCreater()
-    cfg_file = "../cfg/yolov3.cfg"
     cfg = prase_cfg(cfg_file)
     test_target = ["convolutional", "upsample", "shortcut", "route", "yolo"]
     for item in cfg:
@@ -83,7 +79,7 @@ def prep_image(img, inp_dim):
 
 def get_test_input(img_path=None):
     if img_path is None:
-        img_path = "../data/test_img/dog-cycle-car.png"
+        img_path = ".../data/test_img/dog-cycle-car.png"
     img = cv2.imread(img_path)
     img = cv2.resize(img, (416, 416))  # Resize to the input dimension
     # BGR -> RGB | H X W C -> C X H X W
@@ -96,8 +92,7 @@ def get_test_input(img_path=None):
 
 
 def test_net():
-    cfg_file = "../cfg/yolov3.cfg"
-    weight_file = '../data/weights/yolov3.weights'
+    weight_file = '.../data/weights/yolov3.weights'
     net = Darknet(cfg_file, use_cuda=False)
     net.load_weights(weight_file)
     img = get_test_input()
@@ -106,8 +101,8 @@ def test_net():
     print(pred.shape)
 
 
-colors = pkl.load(open("../data/pallete", "rb"))
-classes = load_classes('../data/coco.names')
+colors = pkl.load(open("../data/others/pallete", "rb"))
+classes = load_classes('../data/others/coco.names')
 
 
 def write(x, results):
@@ -116,7 +111,7 @@ def write(x, results):
     img = results
     cls = int(x[-1])
     color = random.choice(colors)
-    label = "{0}".format(classes[cls])
+    label = "{0} {1:.3f}".format(classes[cls], x[5]*x[6])
     cv2.rectangle(img, c1, c2, color, 1)
     t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 1, 1)[0]
     c2 = c1[0] + t_size[0] + 3, c1[1] + t_size[1] + 4
@@ -130,31 +125,108 @@ def test_predict_img(img_path=None):
     confidence = 0.5
     nms_thresh = 0.4
     inp_dim = 416
-    classes = load_classes('../data/coco.names')
-
+    use_cuda = 1 and torch.cuda.is_available()
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    if use_cuda:
+        print("predict using cuda!")
+    else:
+        print("not using cuda!")
     if img_path is None:
-        img_path = '../data/test_img/dog-cycle-car.png'
-    cfg_file = "/home/matin23/workspace/YOLO_v3_tutorial_from_scratch-master/cfg/yolov3.cfg"
-    weight_file = '../data/weights/yolov3.weights'
-    net = Darknet(cfg_file, use_cuda=False)
+        # img_path = '../data/img/dog-cycle-car.png'
+        # img_path = '../data/img/bus.jpg'
+        img_path = '../data/img/train.jpg'
+    # weight_file = '../data/weights/yolov3.weights'
+    weight_file = '../data/weights/coco.pt'
+    net = Darknet(cfg_file, use_cuda=use_cuda)
+    # print(net)
     net.load_weights(weight_file)
-    net.eval()
+    # net.eval()
+
+    # see net param
+    # print("Model's state_dict:")
+    # for param_tensor in net.state_dict():
+    #     print(param_tensor, "\t", net.state_dict()[param_tensor].size())
 
     frame = cv2.imread(img_path)
     img = prep_image(frame, inp_dim)
+    batch = 1
+    img = torch.cat([img for i in range(batch)], 0)
 
+    labels = torch.Tensor([[0, 0, 0.515, 0.5, 0.21694873, 0.18286777]])
+    labels = labels.to(device)
+    print("labels.is_cuda",labels.is_cuda)
+
+    timer = vs.Timer()
+    if use_cuda:
+        img = img.cuda()
+        net.cuda()
     with torch.no_grad():
-        out = net(img)
+        timer.start()
+        out, loss = net(img, labels)
+        timer.stop()
+        print("predict a img used {} ms.".format(timer.getMsec()))
     output = write_results(out, confidence, len(classes), nms_thresh)
-    colors = pkl.load(open("../data/pallete", "rb"))
+
+    if 0:
+        path = "../data/weights/coco.pt"
+        torch.save(net.state_dict(), path)
 
     output[:, [1, 3]], output[:, [2, 4]] = letterbox_convert_back(
         frame, (inp_dim, inp_dim), output[:, [1, 3]], output[:, [2, 4]])
-
+    print("output:", output)
+    print("loss:", loss)
     list(map(lambda x: write(x, frame), output))
     cv2.imwrite("frame.png", frame)
-    # cv2.imshow("frame.png", frame)
-    # cv2.waitKey()
+    cv2.imshow("frame.png", frame)
+    cv2.waitKey()
+
+
+def test_cam():
+    confidence = 0.5
+    nms_thresh = 0.4
+    inp_dim = 416
+
+    weight_file = '../data/weights/coco.pt'
+    weight_file = '../data/weights/yolov3.weights'
+    use_cuda = 1 and torch.cuda.is_available()
+
+    net = Darknet(cfg_file, use_cuda=use_cuda)
+    net.load_weights(weight_file)
+    net.eval()
+
+    # 查看显存占用：
+    if False:
+        net = Darknet(cfg_file)
+        stat(net, (3, inp_dim, inp_dim))
+        return
+
+    if use_cuda:
+        print("predict using cuda!")
+        net = net.cuda()
+
+    cap = cv2.VideoCapture(0)
+    timer = vs.Timer()
+    with torch.no_grad():
+        while True:
+            ret, frame = cap.read()
+            img = prep_image(frame, inp_dim)
+            repeat = 1
+            img = torch.cat([img for i in range(repeat)], 0)
+            if use_cuda:
+                img = img.cuda()
+            timer.start()
+            out = net(img)
+            print("out.size():", out.size())
+            timer.stop()
+            print("predict a img used {} ms.".format(timer.getMsec()/repeat))
+            output = write_results(out, confidence, len(classes), nms_thresh)
+            if output is not None:
+                output[:, [1, 3]], output[:, [2, 4]] = letterbox_convert_back(
+                    frame, (inp_dim, inp_dim), output[:, [1, 3]], output[:, [2, 4]])
+                list(map(lambda x: write(x, frame), output))
+            cv2.imshow("frame", frame)
+            cv2.waitKey(1)
+
 
 def test_timer():
     t = Timer()
@@ -172,8 +244,57 @@ def test_import():
     sys.path.append(path)
     import vs_common
     dir(vs_common)
-    a  = vs_common.Timer()
+    a = vs_common.Timer()
     print(a)
+
+
+def test_nettron():
+    import netron
+    netron.start("/home/matin23/workspace/my_yolov3/data/weights/coco.pt")
+
+
+def test_tensorboard():
+    import torch
+    from torch.utils.tensorboard import SummaryWriter
+    from torchviz import make_dot
+    import torchvision.models as models
+
+    cfg_file = "/home/matin23/workspace/my_yolov3/cfg/yolov3.cfg"
+    net = Darknet(cfg_file)
+
+    fake_img = torch.rand(1, 3, 416, 416)  # 输入一个假图片
+    out = net(fake_img)
+    # print(out)
+
+    # 1. 来用tensorboarf进行可视化
+    writer = SummaryWriter(comment='test_your_comment',
+                           filename_suffix="_test_your_filename_suffix")
+    writer.add_graph(net, fake_img)  # 模型及模型输入数据
+
+    # 2. 保存成pt文件后进行可视化
+    torch.save(net, "alexnet.pt")
+
+    # 3. 使用graphviz进行可视化
+    out = net(fake_img)
+    g = make_dot(out)
+    g.render('alexnet', view=True)  # 这种方式会生成一个pdf文件
+
+
+def test_ConvBnBlock():
+    # inp, oup, enable_bn, actv_fn, kernel_size, stride, pad, idx=-1)
+    block = ConvBnBlock(10, 10, 1, 'relu', 3, 1, 1)
+    print(block)
+
+
+def test_netron():
+    onnx_path = "onnx_model_name.onnx"
+    net = Darknet(cfg_file)
+    net.load_state_dict(torch.load(weight_pt))
+    d = torch.rand(1, 3, 416, 416)
+    o = net(d)
+    torch.onnx.export(net, d, onnx_path, opset_version=11)
+    import netron
+    netron.start(onnx_path)
 
 def test_simple():
     # test_cfg()
@@ -183,10 +304,13 @@ def test_simple():
     # test_list()
     # get_test_input()
     # test_net()
-    # test_predict_img()
+    test_predict_img()
     # test_timer()
-    test_import()
-
-
+    # test_import()
+    # test_cam()
+    # test_nettron()
+    # test_tensorboard()
+    # test_ConvBnBlock()
+    # test_netron()
 
 test_simple()

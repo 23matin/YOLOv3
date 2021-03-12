@@ -8,8 +8,8 @@ This reposity mainly used to code YOLOv3 and hope I can learn something in it.
 
 ## TODOs
 
-- [ ] Code refactoring
-- [ ] Cuda support
+- [x] Code refactoring
+- [x] Cuda support
 - [ ] Train support
 - [ ] 测试集评价指标
 - [ ] form a python version of lib 'vs_common'
