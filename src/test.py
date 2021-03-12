@@ -4,14 +4,16 @@ import vs_common as vs
 from darknet import *
 from torchstat import stat
 
+cfg_file = r"/home/matin23/workspace/my_yolov3/cfg/yolov3.cfg"
+weight_pt = r'/home/matin23/workspace/my_yolov3_1/data/weights/yolov3.weights'
+
+
 def test_cfg():
-    cfg_file = "/home/matin23/PycharmProjects/yolov3/cfg/yolov3.cfg"
     prase_cfg(cfg_file)
 
 
 def testBlockCreater():
     bc = BlockCreater()
-    cfg_file = "../cfg/yolov3.cfg"
     cfg = prase_cfg(cfg_file)
     test_target = ["convolutional", "upsample", "shortcut", "route", "yolo"]
     for item in cfg:
@@ -90,7 +92,6 @@ def get_test_input(img_path=None):
 
 
 def test_net():
-    cfg_file = "../cfg/yolov3.cfg"
     weight_file = '.../data/weights/yolov3.weights'
     net = Darknet(cfg_file, use_cuda=False)
     net.load_weights(weight_file)
@@ -110,7 +111,7 @@ def write(x, results):
     img = results
     cls = int(x[-1])
     color = random.choice(colors)
-    label = "{0}".format(classes[cls])
+    label = "{0} {1:.3f}".format(classes[cls], x[5]*x[6])
     cv2.rectangle(img, c1, c2, color, 1)
     t_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_PLAIN, 1, 1)[0]
     c2 = c1[0] + t_size[0] + 3, c1[1] + t_size[1] + 4
@@ -125,17 +126,21 @@ def test_predict_img(img_path=None):
     nms_thresh = 0.4
     inp_dim = 416
     use_cuda = 1 and torch.cuda.is_available()
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     if use_cuda:
         print("predict using cuda!")
+    else:
+        print("not using cuda!")
     if img_path is None:
-        img_path = '../data/img/dog-cycle-car.png'
-    cfg_file = "/home/matin23/PycharmProjects/yolov3/cfg/yolov3.cfg"
+        # img_path = '../data/img/dog-cycle-car.png'
+        # img_path = '../data/img/bus.jpg'
+        img_path = '../data/img/train.jpg'
     # weight_file = '../data/weights/yolov3.weights'
     weight_file = '../data/weights/coco.pt'
     net = Darknet(cfg_file, use_cuda=use_cuda)
     # print(net)
     net.load_weights(weight_file)
-    net.eval()
+    # net.eval()
 
     # see net param
     # print("Model's state_dict:")
@@ -146,7 +151,10 @@ def test_predict_img(img_path=None):
     img = prep_image(frame, inp_dim)
     batch = 1
     img = torch.cat([img for i in range(batch)], 0)
-    print("img.size():", img.size())
+
+    labels = torch.Tensor([[0, 0, 0.515, 0.5, 0.21694873, 0.18286777]])
+    labels = labels.to(device)
+    print("labels.is_cuda",labels.is_cuda)
 
     timer = vs.Timer()
     if use_cuda:
@@ -154,7 +162,7 @@ def test_predict_img(img_path=None):
         net.cuda()
     with torch.no_grad():
         timer.start()
-        out = net(img)
+        out, loss = net(img, labels)
         timer.stop()
         print("predict a img used {} ms.".format(timer.getMsec()))
     output = write_results(out, confidence, len(classes), nms_thresh)
@@ -165,11 +173,12 @@ def test_predict_img(img_path=None):
 
     output[:, [1, 3]], output[:, [2, 4]] = letterbox_convert_back(
         frame, (inp_dim, inp_dim), output[:, [1, 3]], output[:, [2, 4]])
-
+    print("output:", output)
+    print("loss:", loss)
     list(map(lambda x: write(x, frame), output))
     cv2.imwrite("frame.png", frame)
-    # cv2.imshow("frame.png", frame)
-    # cv2.waitKey()
+    cv2.imshow("frame.png", frame)
+    cv2.waitKey()
 
 
 def test_cam():
@@ -177,7 +186,6 @@ def test_cam():
     nms_thresh = 0.4
     inp_dim = 416
 
-    cfg_file = "/home/matin23/workspace/yolov3/cfg/yolov3.cfg"
     weight_file = '../data/weights/coco.pt'
     weight_file = '../data/weights/yolov3.weights'
     use_cuda = 1 and torch.cuda.is_available()
@@ -186,16 +194,15 @@ def test_cam():
     net.load_weights(weight_file)
     net.eval()
 
-    #查看显存占用：
+    # 查看显存占用：
     if False:
         net = Darknet(cfg_file)
-        stat(net,(3,inp_dim,inp_dim))
-        return 
+        stat(net, (3, inp_dim, inp_dim))
+        return
 
     if use_cuda:
         print("predict using cuda!")
         net = net.cuda()
-
 
     cap = cv2.VideoCapture(0)
     timer = vs.Timer()
@@ -209,6 +216,7 @@ def test_cam():
                 img = img.cuda()
             timer.start()
             out = net(img)
+            print("out.size():", out.size())
             timer.stop()
             print("predict a img used {} ms.".format(timer.getMsec()/repeat))
             output = write_results(out, confidence, len(classes), nms_thresh)
@@ -239,9 +247,11 @@ def test_import():
     a = vs_common.Timer()
     print(a)
 
+
 def test_nettron():
     import netron
-    netron.start("/home/matin23/workspace/yolov3/data/weights/coco.pt")
+    netron.start("/home/matin23/workspace/my_yolov3/data/weights/coco.pt")
+
 
 def test_tensorboard():
     import torch
@@ -249,15 +259,16 @@ def test_tensorboard():
     from torchviz import make_dot
     import torchvision.models as models
 
-    cfg_file = "/home/matin23/workspace/yolov3/cfg/yolov3.cfg"
+    cfg_file = "/home/matin23/workspace/my_yolov3/cfg/yolov3.cfg"
     net = Darknet(cfg_file)
 
-    fake_img = torch.rand(1, 3, 416, 416)  #输入一个假图片
+    fake_img = torch.rand(1, 3, 416, 416)  # 输入一个假图片
     out = net(fake_img)
     # print(out)
 
     # 1. 来用tensorboarf进行可视化
-    writer = SummaryWriter(comment='test_your_comment',filename_suffix="_test_your_filename_suffix")
+    writer = SummaryWriter(comment='test_your_comment',
+                           filename_suffix="_test_your_filename_suffix")
     writer.add_graph(net, fake_img)  # 模型及模型输入数据
 
     # 2. 保存成pt文件后进行可视化
@@ -268,10 +279,22 @@ def test_tensorboard():
     g = make_dot(out)
     g.render('alexnet', view=True)  # 这种方式会生成一个pdf文件
 
+
 def test_ConvBnBlock():
     # inp, oup, enable_bn, actv_fn, kernel_size, stride, pad, idx=-1)
-    block = ConvBnBlock(10,10,1,'relu',3,1,1)
+    block = ConvBnBlock(10, 10, 1, 'relu', 3, 1, 1)
     print(block)
+
+
+def test_netron():
+    onnx_path = "onnx_model_name.onnx"
+    net = Darknet(cfg_file)
+    net.load_state_dict(torch.load(weight_pt))
+    d = torch.rand(1, 3, 416, 416)
+    o = net(d)
+    torch.onnx.export(net, d, onnx_path, opset_version=11)
+    import netron
+    netron.start(onnx_path)
 
 def test_simple():
     # test_cfg()
@@ -281,13 +304,13 @@ def test_simple():
     # test_list()
     # get_test_input()
     # test_net()
-    # test_predict_img()
+    test_predict_img()
     # test_timer()
     # test_import()
-    test_cam()
+    # test_cam()
     # test_nettron()
     # test_tensorboard()
     # test_ConvBnBlock()
-
+    # test_netron()
 
 test_simple()

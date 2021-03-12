@@ -2,6 +2,8 @@ import os
 
 from utils import *
 
+def to_cpu(tensor):
+    return tensor.detach().cpu()
 
 class Darknet(nn.Module):
     def __init__(self, cfg_file, use_cuda=False):
@@ -22,11 +24,12 @@ class Darknet(nn.Module):
         self.decode_cfg["use_cuda"] = use_cuda
         self.decode_cfg["anchors"] = None  # dynamic set
 
-    def forward(self, x):
+    def forward(self, x, target=None):
         outputs = dict()
         output_filters = []
         output_filters.append(x.size(1))
         detections = None  # accumulate decoded detections
+        loss = 0
         for idx, module_info in enumerate(zip(self.module_list, self.module_type_list)):
             module, module_type = module_info
             if module_type in ["convolutional", "upsample"]:
@@ -48,7 +51,8 @@ class Darknet(nn.Module):
                         concate_list.append(outputs[idx + route_idx])
                     x = torch.cat(concate_list, dim=1)
             elif module_type == "yolo":
-                x = module[0](x, use_cuda=self.use_cuda)
+                x, layer_loss = module[0](x, target, use_cuda=self.use_cuda)
+                loss += layer_loss
                 if detections is None:
                     detections = x
                 else:
@@ -57,7 +61,8 @@ class Darknet(nn.Module):
             if False:
                 print("type: ", module_type)
                 print("outputs[{}]".format(idx), outputs[idx])
-        return detections
+        detections = to_cpu(detections)
+        return detections, loss
 
     def load_weights(self, weightfile):
         if os.path.splitext(weightfile)[-1] == '.pt':
