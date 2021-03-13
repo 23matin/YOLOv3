@@ -43,64 +43,111 @@ class YOLODetLayer(nn.Module):
         [batch_id, class_id，cx, cy, w, h]
 
         dets of format:
-        (batch,nums_class+5,grid_size,grid_size,num_anchors)
+        (batch,grid_size,grid_size,nums_class+5,num_anchors)
         """
         n_batch, n_anchors, n_grid = dets.size(0), len(self.anchors), self.grid_size
+        n_obj_nums = target.size(0)
+
+        batch_id = target[:,0].long().t()
+        gt_boxes = target[..., 2:]
+        gt_x,gt_y = gt_boxes[:,0],gt_boxes[:,1]
+        gt_w,gt_h = gt_boxes[:,2],gt_boxes[:,3]
+        gwh = gt_boxes[:,2:4]
+        gwh = gwh*self.img_size
 
         BoolTensor = torch.cuda.BoolTensor if dets.is_cuda else torch.BoolTensor
         FloatTensor = torch.cuda.FloatTensor if dets.is_cuda else torch.FloatTensor
 
         anchors = FloatTensor(self.scaled_anchors)
-
         obj_mask = BoolTensor(n_batch, n_grid, n_grid, n_anchors).fill_(0)
         noobj_mask = BoolTensor(n_batch, n_grid, n_grid, n_anchors).fill_(1)
-        t_obj_conf = FloatTensor(n_batch, n_grid, n_grid, n_anchors).fill_(0)
-        tx = FloatTensor(n_batch, n_grid, n_grid, n_anchors).fill_(0)
-        ty = FloatTensor(n_batch, n_grid, n_grid, n_anchors).fill_(0)
-        th = FloatTensor(n_batch, n_grid, n_grid, n_anchors).fill_(0)
-        tw = FloatTensor(n_batch, n_grid, n_grid, n_anchors).fill_(0)
-        tcls = FloatTensor(n_batch, n_grid,
-                          n_grid, n_anchors, self.num_classes).fill_(0)
 
-        # in pixel coordianate
-        # !!attention: 所有gtbox在pixel坐标系下的坐标  of shale [n_gt,4]
-        target_boxes = target[:, 2:6] * n_grid
-        gwh = target_boxes[:, 2:]  # shape [n,2]
+        t_obj_conf = FloatTensor(n_obj_nums)
+        tx = FloatTensor(n_obj_nums)
+        ty = FloatTensor(n_obj_nums)
+        th = FloatTensor(n_obj_nums)
+        tw = FloatTensor(n_obj_nums)
+        tcls = FloatTensor(n_obj_nums,self.num_classes).fill_(0)
+
         ious = torch.stack([bbox_wh_iou(anchor, gwh)
-                           for anchor in anchors])  # of shape [n_gt,n_anchors]
-        best_iou, anchor_id = ious.max(dim=0)  # (n_gt)
+                           for anchor in self.anchors]).t()
+        best_ious, anchor_id = ious.max(1)
+        print("best_ious,",best_ious)
+        #得到gt_box对应的grid坐标
+        grid_x = (gt_x * self.grid_size)
+        grid_y = (gt_y * self.grid_size)
 
-        gxy = target_boxes[:, :2]
-        gi, gj = gxy.long().t()
+        grid_idx_x =  grid_x.long()
+        grid_idx_y =  grid_y.long()
 
-        # find the best iou and assign obj_mask
-        batch_idx = target[:, 0].long().t()  # !!转换为整数然后转置
-        # !!attention: batch_idx, anchor_id, gxy[0].t(), gxy[1].t() should be in same size and is a row vector
-        obj_mask[batch_idx,  gj, gi,anchor_id] = True
+        obj_mask[batch_id,grid_idx_x,grid_idx_y,anchor_id] = 1
+        noobj_mask[batch_id,grid_idx_x,grid_idx_y,anchor_id] = 0
 
-        noobj_mask[batch_idx, gj, gi,anchor_id] = False
+        #生成 noobj_mask, iou大于iou_thres的不是负样本,所以默认很多负样本
+        noobj_mask[batch_id,grid_idx_x,grid_idx_y,:][ious>self.ignore_thredshold] = 0
 
-        # iou > thredshold
-        # !!attention: 非负和非正的样本只存在于GT对应的那个格子的非最好的其他的anchors，其他格子的都是负样本!!! 如果最好iou的都没有达到ignore_thres 那么这个目标GT没有正样本框
-        for i, anchor_ious in enumerate(ious.t()):
-            noobj_mask[batch_idx[i], gj[i], gi[i], anchor_ious >self.ignore_thredshold] = False
+        #得到对应的真值tx ty tw th 
+        #得到对应的真值tx ty w h 
+        stride = self.img_size/self.grid_size
+        tx = grid_x - grid_x.floor()
+        ty = grid_y - grid_y.floor()
 
-        # cx cy w h
-        offset = gxy - gxy.floor()
-        tx[batch_idx, gj, gi, anchor_id] = offset[:,0]
-        ty[batch_idx, gj, gi, anchor_id] = offset[:,1]
+        #gt的w和h是相对于原图的，要把他们转换为相对于anchor的,再取对数
+        tw = torch.log((gt_w*self.img_size)/self.anchors[anchor_id,0])
+        th = torch.log((gt_h*self.img_size)/self.anchors[anchor_id,1])
+        
+        #生成t_cls
+        tcls[:,target[:,1].long()] = 1
 
-        tw[batch_idx, gj, gi, anchor_id] = torch.log(
-            gwh[:, 0] / anchors[anchor_id][:, 0] + 1e-16)
-        th[batch_idx, gj, gi, anchor_id] = torch.log(
-            gwh[:, 1] / anchors[anchor_id][:, 1] + 1e-16)
+        return obj_mask, noobj_mask, tx, ty, tw, th, tcls
 
-        target_lables = target[:, 1].long().t()
-        tcls[batch_idx, gj, gi, anchor_id, target_lables] = True
 
-        t_obj_conf[obj_mask] = 1.0
+        # t_obj_conf = FloatTensor()
+        # t_obj_conf = FloatTensor(n_batch, n_grid, n_grid, n_anchors).fill_(0)
+        # tx = FloatTensor(n_batch, n_grid, n_grid, n_anchors).fill_(0)
+        # ty = FloatTensor(n_batch, n_grid, n_grid, n_anchors).fill_(0)
+        # th = FloatTensor(n_batch, n_grid, n_grid, n_anchors).fill_(0)
+        # tw = FloatTensor(n_batch, n_grid, n_grid, n_anchors).fill_(0)
+        # tcls = FloatTensor(n_batch, n_grid,
+        #                   n_grid, n_anchors, self.num_classes).fill_(0)
 
-        return obj_mask, noobj_mask, tcls, tx, ty, tw, th, t_obj_conf, tcls
+        # # in pixel coordianate
+        # # !!attention: 所有gtbox在pixel坐标系下的坐标  of shale [n_gt,4]
+        # target_boxes = target[:, 2:6] * n_grid
+        # gwh = target_boxes[:, 2:]  # shape [n,2]
+        # ious = torch.stack([bbox_wh_iou(anchor, gwh)
+        #                    for anchor in anchors])  # of shape [n_gt,n_anchors]
+        # best_iou, anchor_id = ious.max(dim=0)  # (n_gt)
+
+        # gxy = target_boxes[:, :2]
+        # gi, gj = gxy.long().t()
+
+        # # find the best iou and assign obj_mask
+        # batch_idx = target[:, 0].long().t()  # !!转换为整数然后转置
+        # # !!attention: batch_idx, anchor_id, gxy[0].t(), gxy[1].t() should be in same size and is a row vector
+        # obj_mask[batch_idx,  gj, gi,anchor_id] = True
+
+        # noobj_mask[batch_idx, gj, gi,anchor_id] = False
+
+        # # iou > thredshold
+        # # !!attention: 非负和非正的样本只存在于GT对应的那个格子的非最好的其他的anchors，其他格子的都是负样本!!! 如果最好iou的都没有达到ignore_thres 那么这个目标GT没有正样本框
+        # for i, anchor_ious in enumerate(ious.t()):
+        #     noobj_mask[batch_idx[i], gj[i], gi[i], anchor_ious >self.ignore_thredshold] = False
+
+        # # cx cy w h
+        # offset = gxy - gxy.floor()
+        # tx[batch_idx, gj, gi, anchor_id] = offset[:,0]
+        # ty[batch_idx, gj, gi, anchor_id] = offset[:,1]
+
+        # tw[batch_idx, gj, gi, anchor_id] = torch.log(
+        #     gwh[:, 0] / anchors[anchor_id][:, 0] + 1e-16)
+        # th[batch_idx, gj, gi, anchor_id] = torch.log(
+        #     gwh[:, 1] / anchors[anchor_id][:, 1] + 1e-16)
+
+        # target_lables = target[:, 1].long().t()
+        # tcls[batch_idx, gj, gi, anchor_id, target_lables] = True
+
+        return obj_mask, noobj_mask, tcls, tx, ty, tw, th, tcls
 
     def forward(self, x, target=None, use_cuda=False):
         """
@@ -116,6 +163,7 @@ class YOLODetLayer(nn.Module):
             # original x is of shape: [batch_id, len(anchors) * (self.num_classes+5), grid_size,grid_size]
             if x.size(2) != self.grid_size:
                 self.grid_size = x.size(2)
+                self.anchors = FloatTensor(self.anchors)
                 self.scaled_anchors = FloatTensor([[anchor[0]/self.img_size*self.grid_size, anchor[1]/self.img_size*self.grid_size]
                                        for anchor in self.anchors])
                 self.grid_coord_x = torch.arange(self.grid_size).repeat(
@@ -152,7 +200,7 @@ class YOLODetLayer(nn.Module):
             # pred_boxes[..., :2] *= self.grid_size  # prediction in grid pixel size
 
              # !!attention: used to calculate loss
-            x, y, w, h = torch.sigmoid(prediction[..., 0]), torch.sigmoid(prediction[...,1]), prediction[..., 2], prediction[..., 3]
+            px,py,pw,ph = torch.sigmoid(prediction[..., 0]), torch.sigmoid(prediction[...,1]), prediction[..., 2], prediction[..., 3]
 
 
             # decode
@@ -175,32 +223,32 @@ class YOLODetLayer(nn.Module):
             if target is None:
                 return outputs, 0.
 
-            obj_mask, noobj_mask, tcls, tx, ty, tw, th, t_obj_conf, tcls = self.build_mask(
+            obj_mask, noobj_mask, tx, ty, tw, th, tcls = self.build_mask(
                 x, target=target)
 
             loss = 0
-
             # obj_conf
             loss_conf_obj = self.bce_loss(
-                pred_obj_conf[obj_mask], t_obj_conf[obj_mask])
+                pred_obj_conf[obj_mask], torch.ones(pred_obj_conf[obj_mask].shape))
             loss_conf_noobj = self.bce_loss(
-                pred_obj_conf[noobj_mask], t_obj_conf[noobj_mask])
+                pred_obj_conf[noobj_mask], torch.zeros(pred_obj_conf[noobj_mask].shape))
             loss_conf = self.obj_scale * loss_conf_obj + self.noobj_scale * loss_conf_noobj
 
             # class
-            loss_cls = self.bce_loss(pred_class[obj_mask], tcls[obj_mask])
+            loss_cls = self.bce_loss(pred_class[obj_mask], tcls)
 
-
-
-            loss_x = self.mse_loss(tx[obj_mask], x[obj_mask])
-            loss_y = self.mse_loss(ty[obj_mask], y[obj_mask])
-            loss_w = self.mse_loss(tw[obj_mask], w[obj_mask])
-            loss_h = self.mse_loss(th[obj_mask], h[obj_mask])
-
-
-
-            loss = loss_x+loss_y+loss_w+loss_h + loss_conf+loss_cls
-
+            #coord loss
+            loss_x = self.mse_loss(px[obj_mask],tx)
+            loss_y = self.mse_loss(py[obj_mask],ty)
+            loss_w = self.mse_loss(pw[obj_mask],tw)
+            loss_h = self.mse_loss(ph[obj_mask],th)
+            loss_coord = loss_x+loss_y+loss_w+loss_h
+            loss = loss_coord + loss_conf + loss_cls
+            if 1:
+                print("loss_coord",loss_coord)
+                print("loss_conf",loss_conf)
+                print("loss_cls", loss_cls)
+                print("total loss:",loss)
             return outputs, loss
 
 
@@ -307,3 +355,4 @@ if __name__ == "__main__":
     # test_slices()
     # test_grid()
     test_cat()
+

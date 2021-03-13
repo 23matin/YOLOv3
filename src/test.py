@@ -4,8 +4,8 @@ import vs_common as vs
 from darknet import *
 from torchstat import stat
 
-cfg_file = r"/home/matin23/workspace/my_yolov3/cfg/yolov3.cfg"
-weight_pt = r'/home/matin23/workspace/my_yolov3_1/data/weights/yolov3.weights'
+cfg_file = r"../cfg/yolov3.cfg"
+weight_file = r'../data/weights/yolov3.weights'
 
 
 def test_cfg():
@@ -121,7 +121,7 @@ def write(x, results):
     return img
 
 
-def test_predict_img(img_path=None):
+def test_predict_img(img_path=None,img_show = False):
     confidence = 0.5
     nms_thresh = 0.4
     inp_dim = 416
@@ -136,11 +136,10 @@ def test_predict_img(img_path=None):
         # img_path = '../data/img/bus.jpg'
         img_path = '../data/img/train.jpg'
     # weight_file = '../data/weights/yolov3.weights'
-    weight_file = '../data/weights/coco.pt'
     net = Darknet(cfg_file, use_cuda=use_cuda)
     # print(net)
     net.load_weights(weight_file)
-    # net.eval()
+    net.eval()
 
     # see net param
     # print("Model's state_dict:")
@@ -151,10 +150,11 @@ def test_predict_img(img_path=None):
     img = prep_image(frame, inp_dim)
     batch = 1
     img = torch.cat([img for i in range(batch)], 0)
-
+    print(img)
     labels = torch.Tensor([[0, 0, 0.515, 0.5, 0.21694873, 0.18286777]])
-    labels = labels.to(device)
-    print("labels.is_cuda",labels.is_cuda)
+    labels = torch.cat([labels for i in range(batch)], 0)
+    if batch > 1:
+        labels[:, 0] = torch.arange(batch)
 
     timer = vs.Timer()
     if use_cuda:
@@ -167,7 +167,7 @@ def test_predict_img(img_path=None):
         print("predict a img used {} ms.".format(timer.getMsec()))
     output = write_results(out, confidence, len(classes), nms_thresh)
 
-    if 0:
+    if 1:
         path = "../data/weights/coco.pt"
         torch.save(net.state_dict(), path)
 
@@ -177,8 +177,9 @@ def test_predict_img(img_path=None):
     print("loss:", loss)
     list(map(lambda x: write(x, frame), output))
     cv2.imwrite("frame.png", frame)
-    cv2.imshow("frame.png", frame)
-    cv2.waitKey()
+    if img_show:
+        cv2.imshow("frame.png", frame)
+        cv2.waitKey()
 
 
 def test_cam():
@@ -215,8 +216,7 @@ def test_cam():
             if use_cuda:
                 img = img.cuda()
             timer.start()
-            out = net(img)
-            print("out.size():", out.size())
+            out,_ = net(img)
             timer.stop()
             print("predict a img used {} ms.".format(timer.getMsec()/repeat))
             output = write_results(out, confidence, len(classes), nms_thresh)
